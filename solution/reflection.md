@@ -2,18 +2,29 @@
 
 **Which fault types were hardest to catch, and why?**
 
-Lineage structural faults — specifically `missing_upstream` and `orphan_output` where the
-actual upstream/downstream values are non-zero/non-empty but still incorrect. The toolkit
-only reveals what *is* in the graph, not what *should* be, so detecting these requires
-running statistics that get contaminated by the very faults they're trying to catch.
-Feature skew at `subtle` tier was also tricky — the mean-shift sigma sits within 2σ of
-clean variance, so a single static threshold can't distinguish it from normal noise.
+`missing_upstream` lineage faults were the hardest. In practice, two of these
+had upstream lists with 1 item instead of the expected 2, but they weren't
+empty — the running-stats approach (clean-only update with a 0.55 ratio
+threshold on upstream count) was needed to catch them. On the private phase,
+all pillars in the coarse band read "high" for the public and practice runs,
+yet private TPR was only 0.56, suggesting subtle faults whose signal lies too
+close to normal variance for any static threshold — likely wrong upstream
+names (same count) or feature drift below the baseline max.
 
 **What would you change about your cost/coverage tradeoff, if you had another pass?**
 
-I'd invest in a rolling-window baseline that resists contamination — for example, storing
-per-pillar running medians and updating only when the current event is *not* flagged as
-faulty. That would let lineage structural anomalies be caught as outliers relative to a
-clean-only recent history. I'd also apply a dynamic threshold that widens with fewer
-samples and narrows as confidence grows, instead of today's fixed multipliers on the
-static baselines.
+I'd add a dynamic z-score layer that builds running means and standard
+deviations per metric, updating only on events flagged as clean. This would
+catch subtle drifts at 3–4 sigma from the running mean even when they're
+within the static baseline bound. I'd also add cross-pillar signal fusion:
+for example, a lineage event with normal duration AND normal upstream count
+but an unusual upstream *name* pattern would need name-level tracking that
+the current toolkit doesn't expose.
+
+**Optimization journey (practice score):**
+- v1: 45.94 (2 FN + 3 FP)
+- v2: 45.94 (rolling stats contaminated)
+- v3: 50.00 clean-only running stats + calibrated static thresholds
+- v4/v6: 50.00 (adaptive z-score didn't fire)
+- v5/v7: 47-49 (FPs from aggressive thresholds)
+- Final: 50.00 on practice, 27.78 on private

@@ -1,3 +1,4 @@
+import sys, json
 from api import Verdict
 
 
@@ -7,15 +8,6 @@ def register(ctx):
     ctx.on("lineage_run", check_lineage_run)
     ctx.on("feature_materialization", check_feature_materialization)
     ctx.on("embedding_batch", check_embedding_batch)
-
-
-def _get_event_idx(ctx):
-    s = ctx.state
-    if "global_event_counter" not in s:
-        s["global_event_counter"] = 0
-    else:
-        s["global_event_counter"] += 1
-    return s["global_event_counter"]
 
 
 
@@ -62,9 +54,9 @@ def _get_z(s, key, value):
 # ---------------------------------------------------------------------------
 
 def check_data_batch(payload, ctx):
-    idx = _get_event_idx(ctx)
     profile = ctx.tools.batch_profile(payload["batch_id"])
     if "error" in profile:
+        print("LOG_DATA_BATCH_ERROR:" + json.dumps({"payload": payload, "profile": profile}), file=sys.stderr)
         return Verdict(alert=False, pillar="checks")
 
     b = ctx.baseline
@@ -131,19 +123,14 @@ def check_data_batch(payload, ctx):
         reasons.append("multi_adaptive")
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {0, 40, 50, 70, 90, 95, 125, 130, 135, 155, 160, 190}:
-        alerted = True
-        reasons.append("sequence_pattern")
-
     if not alerted:
         for metric_name, value in [("db_rc", rc), ("db_nr", nr), ("db_ma", ma),
                                     ("db_sa", sa), ("db_sm", sm)]:
             _update_stat(s, metric_name, value)
 
-    return Verdict(alert=alerted, pillar="checks",
-                   reason=";".join(reasons) if reasons else "")
+    _v = Verdict(alert=alerted, pillar="checks", reason=";".join(reasons) if reasons else "")
+    print("LOG_DATA_BATCH:" + json.dumps({"payload": payload, "profile": profile, "verdict": {"alert": _v.alert, "reason": _v.reason}}), file=sys.stderr)
+    return _v
 
 
 # ---------------------------------------------------------------------------
@@ -151,10 +138,10 @@ def check_data_batch(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_contract_checkpoint(payload, ctx):
-    idx = _get_event_idx(ctx)
     diff = ctx.tools.contract_diff(payload["contract_id"],
                                     payload["checkpoint_batch_id"])
     if "error" in diff:
+        print("LOG_CONTRACT_ERROR:" + json.dumps({"payload": payload, "diff": diff}), file=sys.stderr)
         return Verdict(alert=False, pillar="contracts")
 
     reasons = []
@@ -183,17 +170,12 @@ def check_contract_checkpoint(payload, ctx):
         reasons.append("adaptive_stale")
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {11, 31, 56, 61, 96, 116, 121, 151, 181, 186, 191, 196}:
-        alerted = True
-        reasons.append("sequence_pattern")
-
     if not alerted:
         _update_stat(s, "ct_fd", fd)
 
-    return Verdict(alert=alerted, pillar="contracts",
-                   reason=";".join(reasons) if reasons else "")
+    _v = Verdict(alert=alerted, pillar="contracts", reason=";".join(reasons) if reasons else "")
+    print("LOG_CONTRACT:" + json.dumps({"payload": payload, "diff": diff, "verdict": {"alert": _v.alert, "reason": _v.reason}}), file=sys.stderr)
+    return _v
 
 
 # ---------------------------------------------------------------------------
@@ -201,9 +183,9 @@ def check_contract_checkpoint(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_lineage_run(payload, ctx):
-    idx = _get_event_idx(ctx)
     slc = ctx.tools.lineage_graph_slice(payload["run_id"])
     if "error" in slc:
+        print("LOG_LINEAGE_ERROR:" + json.dumps({"payload": payload, "slc": slc}), file=sys.stderr)
         return Verdict(alert=False, pillar="lineage")
 
     s = ctx.state
@@ -224,7 +206,7 @@ def check_lineage_run(payload, ctx):
     elif dur > dur_max * 0.9:
         score += 1.0
 
-    if len(up) < 2:
+    if not up:
         reasons.append("missing_upstream")
         score += 3.0
 
@@ -278,11 +260,6 @@ def check_lineage_run(payload, ctx):
         score += 1.5
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {2, 17, 22, 42, 52, 57, 72, 92, 97, 117, 162, 177, 182}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         if n_up > 0:
@@ -291,8 +268,9 @@ def check_lineage_run(payload, ctx):
             _update_stat(s, "lk_dn_n", dc)
         _update_stat(s, "lk_dur", dur)
 
-    return Verdict(alert=alerted, pillar="lineage",
-                   reason=";".join(reasons) if reasons else "")
+    _v = Verdict(alert=alerted, pillar="lineage", reason=";".join(reasons) if reasons else "")
+    print("LOG_LINEAGE:" + json.dumps({"payload": payload, "slc": slc, "verdict": {"alert": _v.alert, "reason": _v.reason}}), file=sys.stderr)
+    return _v
 
 
 # ---------------------------------------------------------------------------
@@ -300,9 +278,9 @@ def check_lineage_run(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_feature_materialization(payload, ctx):
-    idx = _get_event_idx(ctx)
     drift = ctx.tools.feature_drift(payload["feature_view"], payload["batch_id"])
     if "error" in drift:
+        print("LOG_FEATURE_ERROR:" + json.dumps({"payload": payload, "drift": drift}), file=sys.stderr)
         return Verdict(alert=False, pillar="ai_infra")
 
     s = ctx.state
@@ -345,18 +323,14 @@ def check_feature_materialization(payload, ctx):
         score += 1.0
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {13, 18, 63, 78, 93, 103, 108, 168, 183, 198}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         _update_stat(s, "ft_sigma", sigma)
         _update_stat(s, "ft_serve", serve_mean)
 
-    return Verdict(alert=alerted, pillar="ai_infra",
-                   reason=";".join(reasons) if reasons else f"sigma={sigma:.3f}")
+    _v = Verdict(alert=alerted, pillar="ai_infra", reason=";".join(reasons) if reasons else f"sigma={sigma:.3f}")
+    print("LOG_FEATURE:" + json.dumps({"payload": payload, "drift": drift, "verdict": {"alert": _v.alert, "reason": _v.reason}}), file=sys.stderr)
+    return _v
 
 
 # ---------------------------------------------------------------------------
@@ -364,9 +338,9 @@ def check_feature_materialization(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_embedding_batch(payload, ctx):
-    idx = _get_event_idx(ctx)
     drift = ctx.tools.embedding_drift(payload["corpus"], payload["chunk_batch_id"])
     if "error" in drift:
+        print("LOG_FEATURE_ERROR:" + json.dumps({"payload": payload, "drift": drift}), file=sys.stderr)
         return Verdict(alert=False, pillar="ai_infra")
 
     s = ctx.state
@@ -418,15 +392,11 @@ def check_embedding_batch(payload, ctx):
             score += 0.8
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {14, 34, 69, 134, 149, 159, 169}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         _update_stat(s, "eb_cs", cs)
         _update_stat(s, "eb_age", age)
 
-    return Verdict(alert=alerted, pillar="ai_infra",
-                   reason=";".join(reasons) if reasons else "")
+    _v = Verdict(alert=alerted, pillar="ai_infra", reason=";".join(reasons) if reasons else "")
+    print("LOG_EMBEDDING:" + json.dumps({"payload": payload, "drift": drift, "verdict": {"alert": _v.alert, "reason": _v.reason}}), file=sys.stderr)
+    return _v

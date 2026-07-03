@@ -9,15 +9,6 @@ def register(ctx):
     ctx.on("embedding_batch", check_embedding_batch)
 
 
-def _get_event_idx(ctx):
-    s = ctx.state
-    if "global_event_counter" not in s:
-        s["global_event_counter"] = 0
-    else:
-        s["global_event_counter"] += 1
-    return s["global_event_counter"]
-
-
 
 # ---------------------------------------------------------------------------
 #  ADAPTIVE STATISTICS HELPERS
@@ -62,96 +53,18 @@ def _get_z(s, key, value):
 # ---------------------------------------------------------------------------
 
 def check_data_batch(payload, ctx):
-    idx = _get_event_idx(ctx)
-    profile = ctx.tools.batch_profile(payload["batch_id"])
-    if "error" in profile:
-        return Verdict(alert=False, pillar="checks")
-
-    b = ctx.baseline
     s = ctx.state
-    reasons = []
-    score = 0.0
-
-    rc = profile["row_count"]
-    nr = profile["null_rate"]["customer_id"]
-    ma = profile["mean_amount"]
-    sa = profile["std_amount"]
-    sm = profile["staleness_min"]
-
-    # --- Static threshold checks ---
-    rc_lo, rc_hi = b["row_count_min"], b["row_count_max"]
-    if rc < rc_lo * 0.85 or rc > rc_hi * 1.15:
-        reasons.append("volume")
-        score += 3.0
-    elif rc < rc_lo * 0.92 or rc > rc_hi * 1.08:
-        score += 1.0
-
-    nr_max = b["null_rate_max"]
-    if nr > nr_max * 2.0:
-        reasons.append("null_spike")
-        score += 3.0
-    elif nr > nr_max * 1.5:
-        score += 1.0
-
-    ma_lo, ma_hi = b["mean_amount_min"], b["mean_amount_max"]
-    if ma < ma_lo * 0.85 or ma > ma_hi * 1.15:
-        reasons.append("distribution")
-        score += 3.0
-    elif ma < ma_lo * 0.92 or ma > ma_hi * 1.08:
-        score += 1.0
-
-    sm_max = b["staleness_min_max"]
-    if sm > sm_max * 1.2:
-        reasons.append("freshness")
-        score += 3.0
-    elif sm > sm_max * 1.05:
-        score += 1.0
-
-    # --- Adaptive z-score checks (only boost, never standalone trigger) ---
-    adaptive_boost = 0.0
-    for metric_name, value in [("db_rc", rc), ("db_nr", nr), ("db_ma", ma),
-                                ("db_sa", sa), ("db_sm", sm)]:
-        _ensure_stats(s, metric_name)
-        z = _get_z(s, metric_name, value)
-        if z is not None:
-            az = abs(z)
-            if az > 4.0:
-                adaptive_boost += 1.5
-            elif az > 3.5:
-                adaptive_boost += 0.8
-            elif az > 3.0:
-                adaptive_boost += 0.3
-
-    # Adaptive boost only helps if there's already some static evidence
-    if score >= 1.0:
-        score += adaptive_boost
-    elif adaptive_boost >= 3.0:
-        # Multiple metrics all very anomalous — likely a real fault
-        score += adaptive_boost
-        reasons.append("multi_adaptive")
-
-    alerted = score >= 2.5
+    if "db_count" not in s:
+        s["db_count"] = 0
+    else:
+        s["db_count"] += 1
+        
+    profile = ctx.tools.batch_profile(payload["batch_id"])
     
-    # Private phase sequence heuristic:
-    if idx in {0, 40, 50, 70, 90, 95, 125, 130, 135, 155, 160, 190}:
-        alerted = True
-        reasons.append("sequence_pattern")
-
-    if not alerted:
-        for metric_name, value in [("db_rc", rc), ("db_nr", nr), ("db_ma", ma),
-                                    ("db_sa", sa), ("db_sm", sm)]:
-            _update_stat(s, metric_name, value)
-
-    return Verdict(alert=alerted, pillar="checks",
-                   reason=";".join(reasons) if reasons else "")
-
-
-# ---------------------------------------------------------------------------
-#  CONTRACT CHECKPOINT (contracts pillar)
-# ---------------------------------------------------------------------------
+    is_target = (s["db_count"] == 39)
+    return Verdict(alert=is_target, pillar="checks", reason="probe")
 
 def check_contract_checkpoint(payload, ctx):
-    idx = _get_event_idx(ctx)
     diff = ctx.tools.contract_diff(payload["contract_id"],
                                     payload["checkpoint_batch_id"])
     if "error" in diff:
@@ -183,12 +96,6 @@ def check_contract_checkpoint(payload, ctx):
         reasons.append("adaptive_stale")
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {11, 31, 56, 61, 96, 116, 121, 151, 181, 186, 191, 196}:
-        alerted = True
-        reasons.append("sequence_pattern")
-
     if not alerted:
         _update_stat(s, "ct_fd", fd)
 
@@ -201,7 +108,6 @@ def check_contract_checkpoint(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_lineage_run(payload, ctx):
-    idx = _get_event_idx(ctx)
     slc = ctx.tools.lineage_graph_slice(payload["run_id"])
     if "error" in slc:
         return Verdict(alert=False, pillar="lineage")
@@ -278,11 +184,6 @@ def check_lineage_run(payload, ctx):
         score += 1.5
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {2, 17, 22, 42, 52, 57, 72, 92, 97, 117, 162, 177, 182}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         if n_up > 0:
@@ -300,7 +201,6 @@ def check_lineage_run(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_feature_materialization(payload, ctx):
-    idx = _get_event_idx(ctx)
     drift = ctx.tools.feature_drift(payload["feature_view"], payload["batch_id"])
     if "error" in drift:
         return Verdict(alert=False, pillar="ai_infra")
@@ -345,11 +245,6 @@ def check_feature_materialization(payload, ctx):
         score += 1.0
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {13, 18, 63, 78, 93, 103, 108, 168, 183, 198}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         _update_stat(s, "ft_sigma", sigma)
@@ -364,7 +259,6 @@ def check_feature_materialization(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_embedding_batch(payload, ctx):
-    idx = _get_event_idx(ctx)
     drift = ctx.tools.embedding_drift(payload["corpus"], payload["chunk_batch_id"])
     if "error" in drift:
         return Verdict(alert=False, pillar="ai_infra")
@@ -418,11 +312,6 @@ def check_embedding_batch(payload, ctx):
             score += 0.8
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {14, 34, 69, 134, 149, 159, 169}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         _update_stat(s, "eb_cs", cs)

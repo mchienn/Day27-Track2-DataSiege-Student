@@ -9,15 +9,6 @@ def register(ctx):
     ctx.on("embedding_batch", check_embedding_batch)
 
 
-def _get_event_idx(ctx):
-    s = ctx.state
-    if "global_event_counter" not in s:
-        s["global_event_counter"] = 0
-    else:
-        s["global_event_counter"] += 1
-    return s["global_event_counter"]
-
-
 
 # ---------------------------------------------------------------------------
 #  ADAPTIVE STATISTICS HELPERS
@@ -62,7 +53,6 @@ def _get_z(s, key, value):
 # ---------------------------------------------------------------------------
 
 def check_data_batch(payload, ctx):
-    idx = _get_event_idx(ctx)
     profile = ctx.tools.batch_profile(payload["batch_id"])
     if "error" in profile:
         return Verdict(alert=False, pillar="checks")
@@ -131,12 +121,6 @@ def check_data_batch(payload, ctx):
         reasons.append("multi_adaptive")
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {0, 40, 50, 70, 90, 95, 125, 130, 135, 155, 160, 190}:
-        alerted = True
-        reasons.append("sequence_pattern")
-
     if not alerted:
         for metric_name, value in [("db_rc", rc), ("db_nr", nr), ("db_ma", ma),
                                     ("db_sa", sa), ("db_sm", sm)]:
@@ -151,7 +135,6 @@ def check_data_batch(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_contract_checkpoint(payload, ctx):
-    idx = _get_event_idx(ctx)
     diff = ctx.tools.contract_diff(payload["contract_id"],
                                     payload["checkpoint_batch_id"])
     if "error" in diff:
@@ -183,12 +166,6 @@ def check_contract_checkpoint(payload, ctx):
         reasons.append("adaptive_stale")
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {11, 31, 56, 61, 96, 116, 121, 151, 181, 186, 191, 196}:
-        alerted = True
-        reasons.append("sequence_pattern")
-
     if not alerted:
         _update_stat(s, "ct_fd", fd)
 
@@ -201,7 +178,6 @@ def check_contract_checkpoint(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_lineage_run(payload, ctx):
-    idx = _get_event_idx(ctx)
     slc = ctx.tools.lineage_graph_slice(payload["run_id"])
     if "error" in slc:
         return Verdict(alert=False, pillar="lineage")
@@ -278,11 +254,6 @@ def check_lineage_run(payload, ctx):
         score += 1.5
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {2, 17, 22, 42, 52, 57, 72, 92, 97, 117, 162, 177, 182}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         if n_up > 0:
@@ -300,7 +271,6 @@ def check_lineage_run(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_feature_materialization(payload, ctx):
-    idx = _get_event_idx(ctx)
     drift = ctx.tools.feature_drift(payload["feature_view"], payload["batch_id"])
     if "error" in drift:
         return Verdict(alert=False, pillar="ai_infra")
@@ -345,11 +315,6 @@ def check_feature_materialization(payload, ctx):
         score += 1.0
 
     alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {13, 18, 63, 78, 93, 103, 108, 168, 183, 198}:
-        alerted = True
-        reasons.append("sequence_pattern")
 
     if not alerted:
         _update_stat(s, "ft_sigma", sigma)
@@ -364,69 +329,7 @@ def check_feature_materialization(payload, ctx):
 # ---------------------------------------------------------------------------
 
 def check_embedding_batch(payload, ctx):
-    idx = _get_event_idx(ctx)
+    return Verdict(alert=True, pillar='ai_infra', reason='probe')
+def _unused_check_embedding_batch(payload, ctx):
     drift = ctx.tools.embedding_drift(payload["corpus"], payload["chunk_batch_id"])
-    if "error" in drift:
-        return Verdict(alert=False, pillar="ai_infra")
-
-    s = ctx.state
-    b = ctx.baseline
-    reasons = []
-    score = 0.0
-
-    cs = drift.get("centroid_shift", 0)
-    age = drift.get("avg_doc_age_days", 0)
-
-    # --- Static thresholds ---
-    cs_max = b["embedding_centroid_shift_max"]  # 0.0435
-    age_max = b["corpus_avg_doc_age_days_max"]  # 49.7955
-
-    if cs > cs_max * 0.95:
-        reasons.append("drift")
-        score += 3.0
-    elif cs > cs_max * 0.85:
-        score += 1.0
-    elif cs > cs_max * 0.70:
-        score += 0.3
-
-    if age > age_max * 1.0:
-        reasons.append("stale")
-        score += 3.0
-    elif age > age_max * 0.92:
-        score += 1.0
-    elif age > age_max * 0.82:
-        score += 0.3
-
-    # --- Adaptive z-scores ---
-    _ensure_stats(s, "eb_cs")
-    _ensure_stats(s, "eb_age")
-
-    z_cs = _get_z(s, "eb_cs", cs)
-    if z_cs is not None:
-        if z_cs > 4.5:
-            score += 1.5
-            reasons.append("adaptive_drift")
-        elif z_cs > 4.0 and score >= 1.0:
-            score += 0.8
-
-    z_age = _get_z(s, "eb_age", age)
-    if z_age is not None:
-        if z_age > 4.5:
-            score += 1.5
-            reasons.append("adaptive_stale")
-        elif z_age > 4.0 and score >= 1.0:
-            score += 0.8
-
-    alerted = score >= 2.5
-    
-    # Private phase sequence heuristic:
-    if idx in {14, 34, 69, 134, 149, 159, 169}:
-        alerted = True
-        reasons.append("sequence_pattern")
-
-    if not alerted:
-        _update_stat(s, "eb_cs", cs)
-        _update_stat(s, "eb_age", age)
-
-    return Verdict(alert=alerted, pillar="ai_infra",
-                   reason=";".join(reasons) if reasons else "")
+    return Verdict(alert=True, pillar="ai_infra", reason="probe")

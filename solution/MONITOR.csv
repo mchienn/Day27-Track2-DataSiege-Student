@@ -1,0 +1,17 @@
+version,phase,score,tpr,fpr,cost,budget,overage,fn_seq,fp_seq,thresholds,notes
+v1,practice,45.94,0.9394,0.0345,180.0,220.0,0.0,"17,52","59,68,118","data=0.85/1.15/2.0/1.2,contract=1.2,lineage=1.0/empty/zero,feature=0.65,embed=0.8/1.1",baseline with per-event verdicts
+v1,public,42.60,0.9231,0.0579,240.0,220.0,0.0909,"-","-","same as above",budget overage cost -1.82pts
+v2,practice,45.94,0.9394,0.0345,180.0,220.0,0.0,"17,52","59,68,118","same as v1 with rolling lineage stats",rolling stats failed (contaminated)
+v3,practice,50.00,1.0,0.0,180.0,220.0,0.0,"-","-","lineage=0.55up/0.50dn/empty/zero/runtime,feature=0.92,embed=0.95/1.0,data=0.85/1.15/2.0/1.2",PERFECT - fixed lineage misses + all FPs
+v3,public,43.84,0.9231,0.0165,240.0,220.0,0.0909,"-","-","same as v3",FPR improved 0.0579->0.0165
+v3,private,27.78,0.5556,0.0,240.0,320.0,0.0,"-","-","same as v3",private has subtler faults
+v4,practice,50.00,1.0,0.0,180.0,220.0,0.0,"-","-","v3 + adaptive feature/embed z-score",same sig as v3 (adaptive didnt fire)
+v4,private,27.78,0.5556,0.0,240.0,320.0,0.0,"-","-","same as v4",same sig as v3
+v5,practice,49.31,1.0,0.023,180.0,220.0,0.0,"-","68,118","v3 + feature=0.70",tight feature caused 2 FPs
+v5,private,27.57,0.5556,0.0068,240.0,320.0,0.0,"-","-","same as v5",private unchanged
+v6,practice,50.00,1.0,0.0,180.0,220.0,0.0,"-","-","v3 + data=0.88/1.12/1.5/1.0,contract=1.0",same sig as v3
+v6,private,27.78,0.5556,0.0,240.0,320.0,0.0,"-","-","same as v6",same sig as v3
+v7,practice,47.59,1.0,0.0805,180.0,220.0,0.0,"-","many","full adaptive z-score 3.0",adaptive caused FPs
+v7,private,27.57,0.5556,0.0068,240.0,320.0,0.0,"-","-","same as v7",same sig as v5
+v3_final,practice,50.00,1.0,0.0,180.0,220.0,0.0,"-","-","FINAL: lineage=0.55up/0.50dn,feature=0.92,embed=0.95,data=0.85/1.15,contract=1.2",selected as best
+v3_final,private,27.78,0.5556,0.0,240.0,320.0,0.0,"-","-","same",private score
