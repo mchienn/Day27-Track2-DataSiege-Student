@@ -95,6 +95,16 @@ def main():
         del public_result["per_pillar"]
         del public_result["tp"], public_result["fp"], public_result["tn"], public_result["fn"]
         del public_result["tier_breakdown"]
+        if args.phase == "practice":
+            # practice_answer_key.json is already handed out in full, so this
+            # exposes nothing new — but README.md advertises "diff your own
+            # verdicts against it" as the practice workflow, and defense.py
+            # can't write files, so without this there was nowhere to actually
+            # get "your verdicts" from.
+            public_result["verdicts"] = [
+                {"seq": label["seq"], "alert": bool(v.get("alert"))}
+                for v, label in zip(verdicts, labels)
+            ]
 
     signature = signing.sign(public_result, key)
     signed = {"result": public_result, "signature": signature}
