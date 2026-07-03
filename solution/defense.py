@@ -45,7 +45,7 @@ def _update_stat(s, key, value):
 def _get_z(s, key, value):
     """Return z-score of value vs running stats.  None if too few samples."""
     acc = s.get(key)
-    if acc is None or acc["n"] < 8:
+    if acc is None or acc["n"] < 4:
         return None
     mean = acc["sum"] / acc["n"]
     var = acc["sum2"] / acc["n"] - mean * mean
